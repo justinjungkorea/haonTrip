@@ -84,13 +84,12 @@ function addEventToBuckets(ev, timezone, map) {
   }
 }
 
-/** ===== 구글 시트 불러오기 ===== */
-async function fetchSheet() {
-  const url = import.meta.env.VITE_SHEET_URL; // .env 에 VITE_SHEET_URL 지정
-  const res = await fetch(url);
+/** ===== 데이터 fetch ===== */
+async function fetchItinerary() {
+  const res = await fetch(import.meta.env.VITE_SHEET_URL);
   const text = await res.text();
   const rows = text.trim().split("\n");
-  const header = rows[0].split(",").map((s) => s.trim());
+  const header = rows[0].split(",").map((h) => h.trim());
 
   return rows.slice(1).map((line) => {
     const cols = line.split(",").map((s) => s.trim());
@@ -98,11 +97,28 @@ async function fetchSheet() {
     header.forEach((h, i) => (obj[h] = cols[i] || ""));
     return {
       startDate: obj["시작일"],
-      startTime: obj["시작시간"].padStart(5, "0"),
+      startTime: obj["시작시간"],
       endDate: obj["종료일"],
-      endTime: obj["종료시간"].padStart(5, "0"),
+      endTime: obj["종료시간"],
       title: obj["제목"],
       tz: obj["타임존"],
+    };
+  });
+}
+
+async function fetchHotels() {
+  const res = await fetch(import.meta.env.VITE_HOTEL_URL);
+  const text = await res.text();
+  const rows = text.trim().split("\n");
+  const header = rows[0].split(",").map((h) => h.trim());
+
+  return rows.slice(1).map((line) => {
+    const cols = line.split(",").map((s) => s.trim());
+    const obj = {};
+    header.forEach((h, i) => (obj[h] = cols[i] || ""));
+    return {
+      date: obj["Date"], // ✅ 구글 시트 컬럼 이름
+      name: obj["Hotel"], // ✅ 구글 시트 컬럼 이름
     };
   });
 }
@@ -111,41 +127,17 @@ export default function App() {
   const [timezone, setTimezone] = useState("KST");
   const [page, setPage] = useState(0);
   const [events, setEvents] = useState([]);
+  const [hotels, setHotels] = useState([]);
 
-  // 🔑 주기(ms) 설정 (env에서 가져옴, 기본 5000)
-  const refreshInterval = import.meta.env.VITE_REFRESH_INTERVAL
-    ? Number(import.meta.env.VITE_REFRESH_INTERVAL)
-    : 5000;
-
-  // ✅ 구글 시트에서 이벤트 불러오기 + 주기적 갱신
+  /** 구글 시트 fetch */
   useEffect(() => {
-    let isMounted = true;
-
     const loadData = async () => {
-      try {
-        const newEvents = await fetchSheet();
-        if (!isMounted) return;
-
-        // 이전 데이터와 비교 → 변경 시에만 업데이트
-        setEvents((prev) => {
-          if (JSON.stringify(prev) !== JSON.stringify(newEvents)) {
-            return newEvents;
-          }
-          return prev;
-        });
-      } catch (err) {
-        console.error("Failed to fetch sheet:", err);
-      }
+      const [ev, ht] = await Promise.all([fetchItinerary(), fetchHotels()]);
+      setEvents(ev);
+      setHotels(ht);
     };
-
-    loadData(); // 최초 실행
-    const timer = setInterval(loadData, refreshInterval);
-
-    return () => {
-      isMounted = false;
-      clearInterval(timer);
-    };
-  }, [refreshInterval]);
+    loadData();
+  }, []);
 
   // 버킷 생성
   const buckets = useMemo(() => {
@@ -158,7 +150,7 @@ export default function App() {
   }, [events, timezone]);
 
   const dates = [...buckets.keys()];
-  const totalPages = Math.max(1, dates.length - 1); // ✅ 매번 dates 길이에 맞춰 갱신
+  const totalPages = Math.max(1, dates.length - 1);
   const curPage = Math.min(page, totalPages - 1);
   const days = dates.slice(curPage, curPage + 2);
 
@@ -175,7 +167,6 @@ export default function App() {
         max = Math.max(max, e);
       }
     }
-
     return [Math.floor(min / 60), Math.ceil(max / 60)];
   }, [buckets]);
 
@@ -188,8 +179,7 @@ export default function App() {
   const dayHeightPx = (dayEndHour - dayStartHour) * HOUR_HEIGHT;
 
   const swipe = useSwipeable({
-    onSwipedLeft: () =>
-      setPage((p) => Math.min(p + 1, Math.max(0, dates.length - 2))),
+    onSwipedLeft: () => setPage((p) => Math.min(p + 1, totalPages - 1)),
     onSwipedRight: () => setPage((p) => Math.max(p - 1, 0)),
     trackMouse: true,
   });
@@ -228,15 +218,23 @@ export default function App() {
         </button>
       </header>
 
-      {/* 날짜 헤더 */}
+      {/* 날짜 헤더 + 호텔 */}
       <div className="flex border-b border-gray-200 bg-white shadow-sm">
         <div className="w-16" />
         {days.map((d) => (
-          <div
-            key={d}
-            className="flex-1 text-center font-semibold py-3 border-b-2 border-transparent hover:border-blue-500 transition"
-          >
-            {formatDate(d)}
+          <div key={d} className="flex-1 text-center py-2">
+            <div className="font-semibold">{formatDate(d)}</div>
+            {/* 호텔 카드 */}
+            {hotels
+              .filter((h) => h.date === d)
+              .map((hotel, idx) => (
+                <div
+                  key={idx}
+                  className="mt-1 mx-auto max-w-[90%] bg-yellow-100 border border-yellow-300 rounded-lg px-2 py-1 text-xs text-gray-700 shadow-sm"
+                >
+                  🏨 {hotel.name}
+                </div>
+              ))}
           </div>
         ))}
       </div>
@@ -274,19 +272,16 @@ export default function App() {
                   const pos = calcBlockStyle(ev.start, ev.end);
                   if (!pos) return null;
                   const color = colors[idx % colors.length];
-                  const key = `${date}-${ev.start}-${ev.end}-${ev.title}`;
                   return (
                     <div
-                      key={key}
+                      key={idx}
                       className={`absolute left-1 right-1 rounded-xl border border-gray-300 shadow-md p-2 transition transform hover:scale-105 hover:shadow-lg ${color}`}
                       style={{ top: pos.top, height: pos.height }}
                     >
                       <div className="text-xs font-bold text-gray-700">
                         {ev.start} ~ {ev.end}
                       </div>
-                      <div className="text-sm font-semibold text-gray-900 mt-1">
-                        {ev.title}
-                      </div>
+                      <div className="text-sm font-semibold text-gray-900 mt-1">{ev.title}</div>
                     </div>
                   );
                 })}
