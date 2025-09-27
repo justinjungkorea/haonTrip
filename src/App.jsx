@@ -98,7 +98,7 @@ async function fetchSheet() {
     header.forEach((h, i) => (obj[h] = cols[i] || ""));
     return {
       startDate: obj["시작일"],
-      startTime: obj["시작시간"].padStart(5, "0"), // 9:00 → 09:00 보정
+      startTime: obj["시작시간"].padStart(5, "0"),
       endDate: obj["종료일"],
       endTime: obj["종료시간"].padStart(5, "0"),
       title: obj["제목"],
@@ -112,10 +112,40 @@ export default function App() {
   const [page, setPage] = useState(0);
   const [events, setEvents] = useState([]);
 
-  // ✅ 구글 시트에서 이벤트 불러오기
+  // 🔑 주기(ms) 설정 (env에서 가져옴, 기본 5000)
+  const refreshInterval = import.meta.env.VITE_REFRESH_INTERVAL
+    ? Number(import.meta.env.VITE_REFRESH_INTERVAL)
+    : 5000;
+
+  // ✅ 구글 시트에서 이벤트 불러오기 + 주기적 갱신
   useEffect(() => {
-    fetchSheet().then(setEvents).catch(console.error);
-  }, []);
+    let isMounted = true;
+
+    const loadData = async () => {
+      try {
+        const newEvents = await fetchSheet();
+        if (!isMounted) return;
+
+        // 이전 데이터와 비교 → 변경 시에만 업데이트
+        setEvents((prev) => {
+          if (JSON.stringify(prev) !== JSON.stringify(newEvents)) {
+            return newEvents;
+          }
+          return prev;
+        });
+      } catch (err) {
+        console.error("Failed to fetch sheet:", err);
+      }
+    };
+
+    loadData(); // 최초 실행
+    const timer = setInterval(loadData, refreshInterval);
+
+    return () => {
+      isMounted = false;
+      clearInterval(timer);
+    };
+  }, [refreshInterval]);
 
   // 버킷 생성
   const buckets = useMemo(() => {
@@ -128,9 +158,9 @@ export default function App() {
   }, [events, timezone]);
 
   const dates = [...buckets.keys()];
-  const totalPages = Math.max(1, dates.length - 1); // n일 → n-1 페이지
+  const totalPages = Math.max(1, dates.length - 1); // ✅ 매번 dates 길이에 맞춰 갱신
   const curPage = Math.min(page, totalPages - 1);
-  const days = dates.slice(curPage, curPage + 2); // ✅ 슬라이딩 윈도우
+  const days = dates.slice(curPage, curPage + 2);
 
   // 시간 범위 자동 계산
   const [dayStartHour, dayEndHour] = useMemo(() => {
@@ -158,7 +188,8 @@ export default function App() {
   const dayHeightPx = (dayEndHour - dayStartHour) * HOUR_HEIGHT;
 
   const swipe = useSwipeable({
-    onSwipedLeft: () => setPage((p) => Math.min(p + 1, totalPages - 1)),
+    onSwipedLeft: () =>
+      setPage((p) => Math.min(p + 1, Math.max(0, dates.length - 2))),
     onSwipedRight: () => setPage((p) => Math.max(p - 1, 0)),
     trackMouse: true,
   });
@@ -193,7 +224,7 @@ export default function App() {
           className="px-4 py-1 rounded-full bg-blue-500 text-white text-sm shadow hover:bg-blue-600 transition"
           onClick={() => setTimezone((t) => (t === "KST" ? "PST" : "KST"))}
         >
-          {timezone}
+          {timezone == "KST"?"현지시간":"한국시간"}
         </button>
       </header>
 
@@ -243,9 +274,10 @@ export default function App() {
                   const pos = calcBlockStyle(ev.start, ev.end);
                   if (!pos) return null;
                   const color = colors[idx % colors.length];
+                  const key = `${date}-${ev.start}-${ev.end}-${ev.title}`;
                   return (
                     <div
-                      key={idx}
+                      key={key}
                       className={`absolute left-1 right-1 rounded-xl border border-gray-300 shadow-md p-2 transition transform hover:scale-105 hover:shadow-lg ${color}`}
                       style={{ top: pos.top, height: pos.height }}
                     >
