@@ -161,11 +161,13 @@ export default function App() {
   const days = dates.slice(curPage, curPage + 2);
 
   // 시간 범위 자동 계산
+  // 시간 범위 자동 계산 (현재 페이지 2일만 반영)
   const [dayStartHour, dayEndHour] = useMemo(() => {
     let min = 24 * 60;
     let max = 0;
 
-    for (const arr of buckets.values()) {
+    for (const d of days) {
+      const arr = buckets.get(d) || [];
       for (const ev of arr) {
         const s = toMinutes(ev.start);
         const e = toMinutes(ev.end);
@@ -173,8 +175,14 @@ export default function App() {
         max = Math.max(max, e);
       }
     }
+
+    // 안전하게 최소/최대 보정
+    if (min === 24 * 60) min = 8 * 60; // 기본값 08:00
+    if (max === 0) max = 20 * 60;      // 기본값 20:00
+
     return [Math.floor(min / 60), Math.ceil(max / 60)];
-  }, [buckets]);
+  }, [buckets, days]);
+
 
   const hours = useMemo(() => {
     const arr = [];
