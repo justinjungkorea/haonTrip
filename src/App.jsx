@@ -39,7 +39,7 @@ const formatDate = (dateStr) => {
 };
 
 /** ===== Layout config ===== */
-const HOUR_HEIGHT = 80; // ⬆️ 시간당 높이 증가 (기존 60 → 80)
+const HOUR_HEIGHT = 80; // ⬆️ 시간당 높이
 const PX_PER_MIN = HOUR_HEIGHT / 60;
 
 /** 이벤트 분리 */
@@ -134,6 +134,7 @@ export default function App() {
   const [page, setPage] = useState(0);
   const [events, setEvents] = useState([]);
   const [hotels, setHotels] = useState([]);
+  const [daysPerPage, setDaysPerPage] = useState(2);
 
   /** 구글 시트 fetch */
   useEffect(() => {
@@ -143,6 +144,19 @@ export default function App() {
       setHotels(ht);
     };
     loadData();
+  }, []);
+
+  /** 화면 크기에 따라 daysPerPage 조정 */
+  useEffect(() => {
+    const updateDaysPerPage = () => {
+      const w = window.innerWidth;
+      if (w < 640) setDaysPerPage(2); // 모바일
+      else if (w < 1024) setDaysPerPage(3); // 태블릿
+      else setDaysPerPage(4); // 데스크탑 이상
+    };
+    updateDaysPerPage();
+    window.addEventListener("resize", updateDaysPerPage);
+    return () => window.removeEventListener("resize", updateDaysPerPage);
   }, []);
 
   // 버킷 생성
@@ -156,9 +170,9 @@ export default function App() {
   }, [events, timezone]);
 
   const dates = [...buckets.keys()];
-  const totalPages = Math.max(1, dates.length - 1);
+  const totalPages = Math.max(1, dates.length - daysPerPage + 1);
   const curPage = Math.min(page, totalPages - 1);
-  const days = dates.slice(curPage, curPage + 2);
+  const days = dates.slice(curPage, curPage + daysPerPage);
 
   // 시간 범위 자동 계산
   const [dayStartHour, dayEndHour] = useMemo(() => {
@@ -243,7 +257,10 @@ export default function App() {
         </div>
 
         {/* 일정 칼럼 */}
-        <div className="grid grid-cols-2 gap-2 flex-1 px-2 relative">
+        <div
+          className="flex-1 px-2 relative grid gap-2"
+          style={{ gridTemplateColumns: `repeat(${daysPerPage}, 1fr)` }}
+        >
           {days.map((date) => {
             const events = buckets.get(date) || [];
             return (
