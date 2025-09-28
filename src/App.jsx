@@ -85,6 +85,12 @@ function addEventToBuckets(ev, timezone, map) {
 }
 
 /** ===== 데이터 fetch ===== */
+function normalizeTime(t) {
+  if (!t) return "00:00";
+  const [h, m] = t.split(":").map(Number);
+  return `${String(h).padStart(2, "0")}:${String(m || 0).padStart(2, "0")}`;
+}
+
 async function fetchItinerary() {
   const res = await fetch(import.meta.env.VITE_SHEET_URL);
   const text = await res.text();
@@ -97,9 +103,9 @@ async function fetchItinerary() {
     header.forEach((h, i) => (obj[h] = cols[i] || ""));
     return {
       startDate: obj["시작일"],
-      startTime: obj["시작시간"],
+      startTime: normalizeTime(obj["시작시간"]),
       endDate: obj["종료일"],
-      endTime: obj["종료시간"],
+      endTime: normalizeTime(obj["종료시간"]),
       title: obj["제목"],
       tz: obj["타임존"],
     };
