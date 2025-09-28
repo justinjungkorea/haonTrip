@@ -39,7 +39,7 @@ const formatDate = (dateStr) => {
 };
 
 /** ===== Layout config ===== */
-const HOUR_HEIGHT = 80; // ⬆️ 시간당 높이
+const HOUR_HEIGHT = 80;
 const PX_PER_MIN = HOUR_HEIGHT / 60;
 
 /** 이벤트 분리 */
@@ -135,13 +135,16 @@ export default function App() {
   const [events, setEvents] = useState([]);
   const [hotels, setHotels] = useState([]);
   const [daysPerPage, setDaysPerPage] = useState(2);
+  const [loading, setLoading] = useState(true); // ✅ 로딩 상태 추가
 
   /** 구글 시트 fetch */
   useEffect(() => {
     const loadData = async () => {
+      setLoading(true);
       const [ev, ht] = await Promise.all([fetchItinerary(), fetchHotels()]);
       setEvents(ev);
       setHotels(ht);
+      setLoading(false);
     };
     loadData();
   }, []);
@@ -208,6 +211,16 @@ export default function App() {
   });
 
   const colors = ["bg-blue-200", "bg-green-200", "bg-yellow-200", "bg-purple-200", "bg-pink-200"];
+
+  /** 로딩 중이면 스피너 표시 */
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-screen bg-gray-50">
+        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
+        <span className="ml-3 text-gray-600 font-medium">로딩중...</span>
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col h-screen bg-gradient-to-b from-gray-50 to-white" {...swipe}>
