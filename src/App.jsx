@@ -39,7 +39,7 @@ const formatDate = (dateStr) => {
 };
 
 /** ===== Layout config ===== */
-const HOUR_HEIGHT = 60;
+const HOUR_HEIGHT = 80; // ⬆️ 시간당 높이 증가 (기존 60 → 80)
 const PX_PER_MIN = HOUR_HEIGHT / 60;
 
 /** 이벤트 분리 */
@@ -123,8 +123,8 @@ async function fetchHotels() {
     const obj = {};
     header.forEach((h, i) => (obj[h] = cols[i] || ""));
     return {
-      date: obj["Date"], // ✅ 구글 시트 컬럼 이름
-      name: obj["Hotel"], // ✅ 구글 시트 컬럼 이름
+      date: obj["Date"],
+      name: obj["Hotel"],
     };
   });
 }
@@ -161,7 +161,6 @@ export default function App() {
   const days = dates.slice(curPage, curPage + 2);
 
   // 시간 범위 자동 계산
-  // 시간 범위 자동 계산 (현재 페이지 2일만 반영)
   const [dayStartHour, dayEndHour] = useMemo(() => {
     let min = 24 * 60;
     let max = 0;
@@ -176,13 +175,11 @@ export default function App() {
       }
     }
 
-    // 안전하게 최소/최대 보정
-    if (min === 24 * 60) min = 8 * 60; // 기본값 08:00
-    if (max === 0) max = 20 * 60;      // 기본값 20:00
+    if (min === 24 * 60) min = 8 * 60;
+    if (max === 0) max = 20 * 60;
 
     return [Math.floor(min / 60), Math.ceil(max / 60)];
   }, [buckets, days]);
-
 
   const hours = useMemo(() => {
     const arr = [];
@@ -190,29 +187,11 @@ export default function App() {
     return arr;
   }, [dayStartHour, dayEndHour]);
 
-  const dayHeightPx = (dayEndHour - dayStartHour) * HOUR_HEIGHT;
-
   const swipe = useSwipeable({
     onSwipedLeft: () => setPage((p) => Math.min(p + 1, totalPages - 1)),
     onSwipedRight: () => setPage((p) => Math.max(p - 1, 0)),
     trackMouse: true,
   });
-
-  const calcBlockStyle = (startHM, endHM) => {
-    const dayStartMin = dayStartHour * 60;
-    const dayEndMin = dayEndHour * 60;
-
-    let sMin = toMinutes(startHM);
-    let eMin = toMinutes(endHM);
-
-    const sClamped = Math.max(dayStartMin, Math.min(dayEndMin, sMin));
-    const eClamped = Math.max(dayStartMin, Math.min(dayEndMin, eMin));
-    if (eClamped <= sClamped) return null;
-
-    const top = (sClamped - dayStartMin) * PX_PER_MIN;
-    const height = Math.max(16, (eClamped - sClamped) * PX_PER_MIN);
-    return { top, height };
-  };
 
   const colors = ["bg-blue-200", "bg-green-200", "bg-yellow-200", "bg-purple-200", "bg-pink-200"];
 
@@ -228,7 +207,7 @@ export default function App() {
           className="px-4 py-1 rounded-full bg-blue-500 text-white text-sm shadow hover:bg-blue-600 transition"
           onClick={() => setTimezone((t) => (t === "KST" ? "PST" : "KST"))}
         >
-          {timezone == "KST"?"현지시간":"한국시간"}
+          {timezone === "KST" ? "현지시간" : "한국시간"}
         </button>
       </header>
 
@@ -238,7 +217,6 @@ export default function App() {
         {days.map((d) => (
           <div key={d} className="flex-1 text-center py-2">
             <div className="font-semibold">{formatDate(d)}</div>
-            {/* 호텔 카드 */}
             {hotels
               .filter((h) => h.date === d)
               .map((hotel, idx) => (
@@ -256,46 +234,46 @@ export default function App() {
       {/* 본문 */}
       <div className="flex flex-1 overflow-y-auto">
         {/* 시간축 */}
-        <div className="w-16 border-r border-gray-200 bg-gray-50">
+        <div className="w-16 border-r border-gray-200 bg-gray-50 sticky left-0 z-10">
           {hours.map((h) => (
             <div key={h} className="relative" style={{ height: HOUR_HEIGHT }}>
-              <span className="absolute -top-2 right-1 text-xs text-gray-400">{h}:00</span>
+              <span className="absolute top-1 right-1 text-xs text-gray-400">{h}:00</span>
             </div>
           ))}
         </div>
 
         {/* 일정 칼럼 */}
         <div className="grid grid-cols-2 gap-2 flex-1 px-2 relative">
-          {hours.map((h, i) => (
-            <div
-              key={`grid-${h}`}
-              className="absolute left-0 right-0 border-t border-gray-100 pointer-events-none"
-              style={{ top: i * HOUR_HEIGHT }}
-            />
-          ))}
-
           {days.map((date) => {
             const events = buckets.get(date) || [];
             return (
               <div
                 key={date}
                 className="relative border-l border-gray-100"
-                style={{ height: dayHeightPx }}
+                style={{
+                  display: "grid",
+                  gridTemplateRows: `repeat(${(dayEndHour - dayStartHour) * 60}, ${PX_PER_MIN}px)`,
+                }}
               >
                 {events.map((ev, idx) => {
-                  const pos = calcBlockStyle(ev.start, ev.end);
-                  if (!pos) return null;
+                  const sMin = toMinutes(ev.start) - dayStartHour * 60;
+                  const eMin = toMinutes(ev.end) - dayStartHour * 60;
+                  if (eMin <= sMin) return null;
                   const color = colors[idx % colors.length];
                   return (
                     <div
                       key={idx}
-                      className={`absolute left-1 right-1 rounded-xl border border-gray-300 shadow-md p-2 transition transform hover:scale-105 hover:shadow-lg ${color}`}
-                      style={{ top: pos.top, height: pos.height }}
+                      className={`rounded-xl border border-gray-300 shadow-md p-2 transition transform hover:scale-105 hover:shadow-lg ${color}`}
+                      style={{
+                        gridRow: `${sMin + 1} / ${eMin + 1}`,
+                      }}
                     >
-                      <div className="text-xs font-bold text-gray-700">
+                      <div className="text-xs font-bold text-gray-700 break-words">
                         {ev.start} ~ {ev.end}
                       </div>
-                      <div className="text-sm font-semibold text-gray-900 mt-1">{ev.title}</div>
+                      <div className="text-sm font-semibold text-gray-900 mt-1 break-words">
+                        {ev.title}
+                      </div>
                     </div>
                   );
                 })}
