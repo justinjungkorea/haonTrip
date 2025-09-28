@@ -130,7 +130,7 @@ async function fetchHotels() {
 }
 
 export default function App() {
-  const [timezone, setTimezone] = useState("KST");
+  const [timezone, setTimezone] = useState("PST");
   const [page, setPage] = useState(0);
   const [events, setEvents] = useState([]);
   const [hotels, setHotels] = useState([]);
