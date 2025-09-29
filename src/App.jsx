@@ -162,7 +162,7 @@ export default function App() {
     };
 
     loadData();
-    timer = setInterval(loadData, 30000); // 30초마다 새로고침 (변화 있을 때만 업데이트)
+    timer = setInterval(loadData, 10000); // 30초마다 새로고침 (변화 있을 때만 업데이트)
 
     return () => clearInterval(timer);
   }, []);
