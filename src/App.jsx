@@ -129,6 +129,15 @@ async function fetchHotels() {
   });
 }
 
+/** 간단 비교 함수 */
+function shallowEqualArray(arr1, arr2) {
+  if (arr1.length !== arr2.length) return false;
+  for (let i = 0; i < arr1.length; i++) {
+    if (JSON.stringify(arr1[i]) !== JSON.stringify(arr2[i])) return false;
+  }
+  return true;
+}
+
 export default function App() {
   const [timezone, setTimezone] = useState("PST");
   const [page, setPage] = useState(0);
@@ -138,13 +147,24 @@ export default function App() {
 
   /** 구글 시트 fetch */
   useEffect(() => {
+    let timer;
     const loadData = async () => {
-      const [ev, ht] = await Promise.all([fetchItinerary(), fetchHotels()]);
-      setEvents(ev);
-      setHotels(ht);
-      setLoading(false);
+      try {
+        const [newEvents, newHotels] = await Promise.all([fetchItinerary(), fetchHotels()]);
+
+        setEvents((prev) => (shallowEqualArray(prev, newEvents) ? prev : newEvents));
+        setHotels((prev) => (shallowEqualArray(prev, newHotels) ? prev : newHotels));
+
+        setLoading(false);
+      } catch (err) {
+        console.error("데이터 로드 실패:", err);
+      }
     };
+
     loadData();
+    timer = setInterval(loadData, 30000); // 30초마다 새로고침 (변화 있을 때만 업데이트)
+
+    return () => clearInterval(timer);
   }, []);
 
   // 버킷 생성
@@ -293,7 +313,7 @@ export default function App() {
                       className={`rounded-xl border border-gray-300 shadow-md p-2 transition transform hover:scale-105 hover:shadow-lg ${color}`}
                       style={{
                         gridRow: `${sMin + 1} / ${eMin + 1}`,
-                        justifySelf: "stretch", // 좌우 꽉 채우기
+                        justifySelf: "stretch",
                       }}
                     >
                       <div className="text-[10px] font-bold text-gray-700 break-words">
