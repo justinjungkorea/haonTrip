@@ -134,32 +134,17 @@ export default function App() {
   const [page, setPage] = useState(0);
   const [events, setEvents] = useState([]);
   const [hotels, setHotels] = useState([]);
-  const [daysPerPage, setDaysPerPage] = useState(2);
-  const [loading, setLoading] = useState(true); // ✅ 로딩 상태 추가
+  const [loading, setLoading] = useState(true);
 
   /** 구글 시트 fetch */
   useEffect(() => {
     const loadData = async () => {
-      setLoading(true);
       const [ev, ht] = await Promise.all([fetchItinerary(), fetchHotels()]);
       setEvents(ev);
       setHotels(ht);
       setLoading(false);
     };
     loadData();
-  }, []);
-
-  /** 화면 크기에 따라 daysPerPage 조정 */
-  useEffect(() => {
-    const updateDaysPerPage = () => {
-      const w = window.innerWidth;
-      if (w < 640) setDaysPerPage(2); // 모바일
-      else if (w < 1024) setDaysPerPage(3); // 태블릿
-      else setDaysPerPage(4); // 데스크탑 이상
-    };
-    updateDaysPerPage();
-    window.addEventListener("resize", updateDaysPerPage);
-    return () => window.removeEventListener("resize", updateDaysPerPage);
   }, []);
 
   // 버킷 생성
@@ -173,8 +158,22 @@ export default function App() {
   }, [events, timezone]);
 
   const dates = [...buckets.keys()];
-  const totalPages = Math.max(1, dates.length - daysPerPage + 1);
+  const totalPages = Math.max(1, dates.length - 1);
   const curPage = Math.min(page, totalPages - 1);
+
+  // 화면 너비에 따라 표시할 일수 계산
+  const [daysPerPage, setDaysPerPage] = useState(2);
+  useEffect(() => {
+    const handleResize = () => {
+      if (window.innerWidth <= 600) setDaysPerPage(3);
+      else if (window.innerWidth <= 900) setDaysPerPage(4);
+      else setDaysPerPage(5);
+    };
+    handleResize();
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
+
   const days = dates.slice(curPage, curPage + daysPerPage);
 
   // 시간 범위 자동 계산
@@ -212,12 +211,10 @@ export default function App() {
 
   const colors = ["bg-blue-200", "bg-green-200", "bg-yellow-200", "bg-purple-200", "bg-pink-200"];
 
-  /** 로딩 중이면 스피너 표시 */
   if (loading) {
     return (
       <div className="flex items-center justify-center h-screen bg-gray-50">
-        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
-        <span className="ml-3 text-gray-600 font-medium">로딩중...</span>
+        <div className="animate-spin rounded-full h-12 w-12 border-4 border-blue-400 border-t-transparent"></div>
       </div>
     );
   }
@@ -240,7 +237,7 @@ export default function App() {
 
       {/* 날짜 헤더 + 호텔 */}
       <div className="flex border-b border-gray-200 bg-white shadow-sm">
-        <div className="w-16" />
+        <div className="w-12" /> {/* 시간축 너비 */}
         {days.map((d) => (
           <div key={d} className="flex-1 text-center py-2">
             <div className="font-semibold">{formatDate(d)}</div>
@@ -249,7 +246,7 @@ export default function App() {
               .map((hotel, idx) => (
                 <div
                   key={idx}
-                  className="mt-1 mx-auto max-w-[90%] bg-yellow-100 border border-yellow-300 rounded-lg px-2 py-1 text-xs text-gray-700 shadow-sm"
+                  className="mt-1 mx-auto max-w-[90%] bg-yellow-100 border border-yellow-300 rounded-lg px-2 py-1 text-[10px] text-gray-700 shadow-sm"
                 >
                   🏨 {hotel.name}
                 </div>
@@ -261,7 +258,7 @@ export default function App() {
       {/* 본문 */}
       <div className="flex flex-1 overflow-y-auto">
         {/* 시간축 */}
-        <div className="w-16 border-r border-gray-200 bg-gray-50 sticky left-0 z-10">
+        <div className="w-12 border-r border-gray-200 bg-gray-50 sticky left-0 z-10">
           {hours.map((h) => (
             <div key={h} className="relative" style={{ height: HOUR_HEIGHT }}>
               <span className="absolute top-1 right-1 text-xs text-gray-400">{h}:00</span>
@@ -271,7 +268,7 @@ export default function App() {
 
         {/* 일정 칼럼 */}
         <div
-          className="flex-1 px-2 relative grid gap-2"
+          className="grid flex-1 gap-2 px-3 relative"
           style={{ gridTemplateColumns: `repeat(${daysPerPage}, 1fr)` }}
         >
           {days.map((date) => {
@@ -296,12 +293,13 @@ export default function App() {
                       className={`rounded-xl border border-gray-300 shadow-md p-2 transition transform hover:scale-105 hover:shadow-lg ${color}`}
                       style={{
                         gridRow: `${sMin + 1} / ${eMin + 1}`,
+                        justifySelf: "stretch", // 좌우 꽉 채우기
                       }}
                     >
-                      <div className="text-xs font-bold text-gray-700 break-words">
+                      <div className="text-[10px] font-bold text-gray-700 break-words">
                         {ev.start} ~ {ev.end}
                       </div>
-                      <div className="text-sm font-semibold text-gray-900 mt-1 break-words">
+                      <div className="text-[12px] font-semibold text-gray-900 mt-1 break-words">
                         {ev.title}
                       </div>
                     </div>
