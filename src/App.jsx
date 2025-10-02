@@ -186,8 +186,8 @@ export default function App() {
   useEffect(() => {
     const handleResize = () => {
       if (window.innerWidth <= 600) setDaysPerPage(3);
-      else if (window.innerWidth <= 900) setDaysPerPage(4);
-      else setDaysPerPage(5);
+      else if (window.innerWidth <= 900) setDaysPerPage(5);
+      else setDaysPerPage(7);
     };
     handleResize();
     window.addEventListener("resize", handleResize);
