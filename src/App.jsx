@@ -78,7 +78,7 @@ function addEventToBuckets(ev, timezone, map) {
     }
 
     if (!map.has(curDate)) map.set(curDate, []);
-    map.get(curDate).push({ title: ev.title, start: startHM, end: endHM });
+    map.get(curDate).push({ title: ev.title, start: startHM, end: endHM, note: ev.note });
 
     cur.setDate(cur.getDate() + 1);
   }
@@ -108,6 +108,7 @@ async function fetchItinerary() {
       endTime: normalizeTime(obj["종료시간"]),
       title: obj["제목"],
       tz: obj["타임존"],
+      note: obj["노트"], // 노트 컬럼 추가
     };
   });
 }
@@ -144,6 +145,7 @@ export default function App() {
   const [events, setEvents] = useState([]);
   const [hotels, setHotels] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [selectedNote, setSelectedNote] = useState(null);
 
   /** 구글 시트 fetch */
   useEffect(() => {
@@ -162,7 +164,7 @@ export default function App() {
     };
 
     loadData();
-    timer = setInterval(loadData, 10000); // 30초마다 새로고침 (변화 있을 때만 업데이트)
+    timer = setInterval(loadData, 30000);
 
     return () => clearInterval(timer);
   }, []);
@@ -310,6 +312,11 @@ export default function App() {
                   return (
                     <div
                       key={idx}
+                      onClick={() => {
+                        if (ev.note && ev.note.trim() !== "") {
+                          setSelectedNote(ev.note);
+                        }
+                      }}
                       className={`rounded-xl border border-gray-300 shadow-md p-2 transition transform hover:scale-105 hover:shadow-lg ${color}`}
                       style={{
                         gridRow: `${sMin + 1} / ${eMin + 1}`,
@@ -319,8 +326,13 @@ export default function App() {
                       <div className="text-[10px] font-bold text-gray-700 break-words">
                         {ev.start} ~ {ev.end}
                       </div>
-                      <div className="text-[12px] font-semibold text-gray-900 mt-1 break-words">
+                      <div className="text-[12px] font-semibold text-gray-900 mt-1 break-words flex items-center gap-1">
                         {ev.title}
+                        {ev.note && ev.note.trim() !== "" && (
+                          <span role="img" aria-label="note" className="text-xs">
+                            📝
+                          </span>
+                        )}
                       </div>
                     </div>
                   );
@@ -330,6 +342,32 @@ export default function App() {
           })}
         </div>
       </div>
+
+      {/* 노트 모달 */}
+      {selectedNote && (
+        <div
+          className="fixed inset-0 flex items-center justify-center bg-black bg-opacity-40 z-50"
+          onClick={() => setSelectedNote(null)}
+        >
+          <div
+            className="bg-white rounded-xl p-6 max-w-md w-[90%] shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 className="text-lg font-bold mb-2">노트</h2>
+
+            <div className="text-gray-700 whitespace-pre-wrap max-h-[300px] overflow-y-auto pr-2">
+              {selectedNote}
+            </div>
+
+            <button
+              className="mt-4 px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 transition"
+              onClick={() => setSelectedNote(null)}
+            >
+              닫기
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
