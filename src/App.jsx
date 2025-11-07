@@ -3,7 +3,7 @@ import { useSwipeable } from "react-swipeable";
 import { FaPlaneDeparture } from "react-icons/fa";
 
 /** ===== Time / TZ helpers ===== */
-const tzOffsets = { KST: 0, PST: -17 };
+const tzOffsets = { KST: 0, PST: -17 }; // 기준은 KST=0, PST=-17시간
 
 const toMinutes = (hm) => {
   let [h, m] = hm.split(":").map(Number);
@@ -14,40 +14,45 @@ const toMinutes = (hm) => {
   return h * 60 + m;
 };
 
-const parseDateTime = (dateStr, hm) => {
-  const [h, m] = hm.split(":").map(Number);
-  const d = new Date(`${dateStr}T${hm}:00`);
-  d.setHours(h, m, 0, 0);
-  return d;
+/** ✅ 로컬이 아닌 UTC 기준으로 Date 생성 */
+const parseDateTimeUTC = (dateStr, hm) => {
+  const [y, m, d] = dateStr.split("-").map(Number);
+  const [H, M] = hm.split(":").map(Number);
+  return new Date(Date.UTC(y, m - 1, d, H, M, 0, 0));
 };
 
+/** ✅ UTC에서만 가감 처리 + UTC로 날짜 추출 */
 const convertDateTime = (dateStr, hm, fromTZ, toTZ) => {
-  const d = parseDateTime(dateStr, hm);
-  d.setHours(d.getHours() + (tzOffsets[toTZ] - tzOffsets[fromTZ]));
-  const yyyy = d.getFullYear();
-  const mm = String(d.getMonth() + 1).padStart(2, "0");
-  const dd = String(d.getDate()).padStart(2, "0");
-  const HH = String(d.getHours()).padStart(2, "0");
-  const MM = String(d.getMinutes()).padStart(2, "0");
+  const d = parseDateTimeUTC(dateStr, hm);
+  d.setUTCHours(d.getUTCHours() + (tzOffsets[toTZ] - tzOffsets[fromTZ]));
+
+  const yyyy = d.getUTCFullYear();
+  const mm = String(d.getUTCMonth() + 1).padStart(2, "0");
+  const dd = String(d.getUTCDate()).padStart(2, "0");
+  const HH = String(d.getUTCHours()).padStart(2, "0");
+  const MM = String(d.getUTCMinutes()).padStart(2, "0");
+
   return { date: `${yyyy}-${mm}-${dd}`, time: `${HH}:${MM}`, full: d };
 };
 
+/** ✅ formatDate도 UTC 기반 */
 const formatDate = (dateStr) => {
-  const d = new Date(dateStr);
-  const yoil = ["일", "월", "화", "수", "목", "금", "토"][d.getDay()];
-  return `${d.getMonth() + 1}월 ${d.getDate()}일 (${yoil})`;
+  const [y, m, d] = dateStr.split("-").map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d, 12, 0)); // 12:00으로 두면 timezone 영향 제거
+  const yoil = ["일", "월", "화", "수", "목", "금", "토"][dt.getUTCDay()];
+  return `${dt.getUTCMonth() + 1}월 ${dt.getUTCDate()}일 (${yoil})`;
 };
 
 /** ===== Layout config ===== */
 const HOUR_HEIGHT = 80;
 const PX_PER_MIN = HOUR_HEIGHT / 60;
 
-/** 이벤트 분리 */
+/** ===== 이벤트를 날짜별로 분배 ===== */
 function addEventToBuckets(ev, timezone, map) {
-  const getDateString = (d) => {
-    const yyyy = d.getFullYear();
-    const mm = String(d.getMonth() + 1).padStart(2, "0");
-    const dd = String(d.getDate()).padStart(2, "0");
+  const getDateStringUTC = (d) => {
+    const yyyy = d.getUTCFullYear();
+    const mm = String(d.getUTCMonth() + 1).padStart(2, "0");
+    const dd = String(d.getUTCDate()).padStart(2, "0");
     return `${yyyy}-${mm}-${dd}`;
   };
 
@@ -55,12 +60,13 @@ function addEventToBuckets(ev, timezone, map) {
   const e = convertDateTime(ev.endDate, ev.endTime, ev.tz, timezone);
 
   let cur = new Date(s.full);
-  cur.setHours(0, 0, 0, 0);
+  cur.setUTCHours(0, 0, 0, 0);
+
   const last = new Date(e.full);
-  last.setHours(0, 0, 0, 0);
+  last.setUTCHours(0, 0, 0, 0);
 
   while (cur.getTime() <= last.getTime()) {
-    const curDate = getDateString(cur);
+    const curDate = getDateStringUTC(cur);
     let startHM, endHM;
 
     if (curDate === s.date && curDate === e.date) {
@@ -73,18 +79,23 @@ function addEventToBuckets(ev, timezone, map) {
       startHM = "00:00";
       endHM = e.time;
     } else {
-      cur.setDate(cur.getDate() + 1);
+      cur.setUTCDate(cur.getUTCDate() + 1);
       continue;
     }
 
     if (!map.has(curDate)) map.set(curDate, []);
-    map.get(curDate).push({ title: ev.title, start: startHM, end: endHM, note: ev.note });
+    map.get(curDate).push({
+      title: ev.title,
+      start: startHM,
+      end: endHM,
+      note: ev.note,
+    });
 
-    cur.setDate(cur.getDate() + 1);
+    cur.setUTCDate(cur.getUTCDate() + 1);
   }
 }
 
-/** ===== 데이터 fetch ===== */
+/** ===== 구글 시트 fetch ===== */
 function normalizeTime(t) {
   if (!t) return "00:00";
   const [h, m] = t.split(":").map(Number);
@@ -108,7 +119,7 @@ async function fetchItinerary() {
       endTime: normalizeTime(obj["종료시간"]),
       title: obj["제목"],
       tz: obj["타임존"],
-      note: obj["노트"], // 노트 컬럼 추가
+      note: obj["노트"],
     };
   });
 }
@@ -130,7 +141,6 @@ async function fetchHotels() {
   });
 }
 
-/** 간단 비교 함수 */
 function shallowEqualArray(arr1, arr2) {
   if (arr1.length !== arr2.length) return false;
   for (let i = 0; i < arr1.length; i++) {
@@ -147,7 +157,7 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [selectedNote, setSelectedNote] = useState(null);
 
-  /** 구글 시트 fetch */
+  /** ===== 데이터 자동 로드 + 변경 감지 ===== */
   useEffect(() => {
     let timer;
     const loadData = async () => {
@@ -156,7 +166,6 @@ export default function App() {
 
         setEvents((prev) => (shallowEqualArray(prev, newEvents) ? prev : newEvents));
         setHotels((prev) => (shallowEqualArray(prev, newHotels) ? prev : newHotels));
-
         setLoading(false);
       } catch (err) {
         console.error("데이터 로드 실패:", err);
@@ -165,14 +174,14 @@ export default function App() {
 
     loadData();
     timer = setInterval(loadData, 30000);
-
     return () => clearInterval(timer);
   }, []);
 
-  // 버킷 생성
+  /** ===== 날짜별 이벤트 버킷 ===== */
   const buckets = useMemo(() => {
     const map = new Map();
     for (const ev of events) addEventToBuckets(ev, timezone, map);
+
     for (const [k, arr] of map) {
       arr.sort((a, b) => toMinutes(a.start) - toMinutes(b.start));
     }
@@ -181,9 +190,8 @@ export default function App() {
 
   const dates = [...buckets.keys()];
   const totalPages = Math.max(1, dates.length - 1);
-  const curPage = Math.min(page, totalPages - 1);
 
-  // 화면 너비에 따라 표시할 일수 계산
+  /** ===== 화면 크기에 따라 보여줄 일수 ===== */
   const [daysPerPage, setDaysPerPage] = useState(2);
   useEffect(() => {
     const handleResize = () => {
@@ -196,9 +204,10 @@ export default function App() {
     return () => window.removeEventListener("resize", handleResize);
   }, []);
 
+  const curPage = Math.min(page, totalPages - 1);
   const days = dates.slice(curPage, curPage + daysPerPage);
 
-  // 시간 범위 자동 계산
+  /** ===== 시간 범위 계산 ===== */
   const [dayStartHour, dayEndHour] = useMemo(() => {
     let min = 24 * 60;
     let max = 0;
@@ -215,7 +224,6 @@ export default function App() {
 
     if (min === 24 * 60) min = 8 * 60;
     if (max === 0) max = 20 * 60;
-
     return [Math.floor(min / 60), Math.ceil(max / 60)];
   }, [buckets, days]);
 
@@ -233,6 +241,7 @@ export default function App() {
 
   const colors = ["bg-blue-200", "bg-green-200", "bg-yellow-200", "bg-purple-200", "bg-pink-200"];
 
+  /** ===== 로딩 화면 ===== */
   if (loading) {
     return (
       <div className="flex items-center justify-center h-screen bg-gray-50">
@@ -241,6 +250,7 @@ export default function App() {
     );
   }
 
+  /** ===== 실제 화면 ===== */
   return (
     <div className="flex flex-col h-screen bg-gradient-to-b from-gray-50 to-white" {...swipe}>
       {/* 상단 헤더 */}
@@ -257,9 +267,9 @@ export default function App() {
         </button>
       </header>
 
-      {/* 날짜 헤더 + 호텔 */}
+      {/* 날짜 헤더 */}
       <div className="flex border-b border-gray-200 bg-white shadow-sm">
-        <div className="w-12" /> {/* 시간축 너비 */}
+        <div className="w-12" />
         {days.map((d) => (
           <div key={d} className="flex-1 text-center py-2">
             <div className="font-semibold">{formatDate(d)}</div>
@@ -283,12 +293,12 @@ export default function App() {
         <div className="w-12 border-r border-gray-200 bg-gray-50 sticky left-0 z-10">
           {hours.map((h) => (
             <div key={h} className="relative" style={{ height: HOUR_HEIGHT }}>
-              <span className="absolute top-1 right-1 text-xs text-gray-400">{h}:00</span>
+              <span className="absolute top-1 right-1 text-[10px] text-gray-400">{h}:00</span>
             </div>
           ))}
         </div>
 
-        {/* 일정 칼럼 */}
+        {/* 이벤트 칼럼 */}
         <div
           className="grid flex-1 gap-2 px-3 relative"
           style={{ gridTemplateColumns: `repeat(${daysPerPage}, 1fr)` }}
@@ -312,27 +322,16 @@ export default function App() {
                   return (
                     <div
                       key={idx}
-                      onClick={() => {
-                        if (ev.note && ev.note.trim() !== "") {
-                          setSelectedNote(ev.note);
-                        }
-                      }}
-                      className={`rounded-xl border border-gray-300 shadow-md p-2 transition transform hover:scale-105 hover:shadow-lg ${color}`}
-                      style={{
-                        gridRow: `${sMin + 1} / ${eMin + 1}`,
-                        justifySelf: "stretch",
-                      }}
+                      onClick={() => ev.note && setSelectedNote(ev.note)}
+                      className={`rounded-xl border border-gray-300 shadow-md p-2 text-[11px] transition transform hover:scale-105 hover:shadow-lg ${color}`}
+                      style={{ gridRow: `${sMin + 1} / ${eMin + 1}` }}
                     >
-                      <div className="text-[10px] font-bold text-gray-700 break-words">
+                      <div className="text-[9px] font-bold text-gray-700 break-words">
                         {ev.start} ~ {ev.end}
                       </div>
-                      <div className="text-[12px] font-semibold text-gray-900 mt-1 break-words flex items-center gap-1">
+                      <div className="text-[12px] font-semibold text-gray-900 mt-1 break-words flex gap-1">
                         {ev.title}
-                        {ev.note && ev.note.trim() !== "" && (
-                          <span role="img" aria-label="note" className="text-xs">
-                            📝
-                          </span>
-                        )}
+                        {ev.note && <span role="img" aria-label="note" className="text-xs">📝</span>}
                       </div>
                     </div>
                   );
@@ -354,11 +353,9 @@ export default function App() {
             onClick={(e) => e.stopPropagation()}
           >
             <h2 className="text-lg font-bold mb-2">노트</h2>
-
             <div className="text-gray-700 whitespace-pre-wrap max-h-[300px] overflow-y-auto pr-2">
               {selectedNote}
             </div>
-
             <button
               className="mt-4 px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 transition"
               onClick={() => setSelectedNote(null)}
