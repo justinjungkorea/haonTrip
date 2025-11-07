@@ -3,7 +3,7 @@ import { useSwipeable } from "react-swipeable";
 import { FaPlaneDeparture } from "react-icons/fa";
 
 /** ===== Time / TZ helpers ===== */
-const tzOffsets = { KST: 0, PST: -17 }; // 기준은 KST=0, PST=-17시간
+const tzOffsets = { KST: 0, PST: -17 }; // KST 기준 상대 오프셋
 
 const toMinutes = (hm) => {
   let [h, m] = hm.split(":").map(Number);
@@ -14,14 +14,14 @@ const toMinutes = (hm) => {
   return h * 60 + m;
 };
 
-/** ✅ 로컬이 아닌 UTC 기준으로 Date 생성 */
+/** UTC 기준으로 Date 생성 */
 const parseDateTimeUTC = (dateStr, hm) => {
   const [y, m, d] = dateStr.split("-").map(Number);
   const [H, M] = hm.split(":").map(Number);
   return new Date(Date.UTC(y, m - 1, d, H, M, 0, 0));
 };
 
-/** ✅ UTC에서만 가감 처리 + UTC로 날짜 추출 */
+/** UTC에서만 가감 + UTC로 문자열 생성 */
 const convertDateTime = (dateStr, hm, fromTZ, toTZ) => {
   const d = parseDateTimeUTC(dateStr, hm);
   d.setUTCHours(d.getUTCHours() + (tzOffsets[toTZ] - tzOffsets[fromTZ]));
@@ -35,10 +35,10 @@ const convertDateTime = (dateStr, hm, fromTZ, toTZ) => {
   return { date: `${yyyy}-${mm}-${dd}`, time: `${HH}:${MM}`, full: d };
 };
 
-/** ✅ formatDate도 UTC 기반 */
+/** 날짜 포맷도 UTC로 */
 const formatDate = (dateStr) => {
   const [y, m, d] = dateStr.split("-").map(Number);
-  const dt = new Date(Date.UTC(y, m - 1, d, 12, 0)); // 12:00으로 두면 timezone 영향 제거
+  const dt = new Date(Date.UTC(y, m - 1, d, 12, 0));
   const yoil = ["일", "월", "화", "수", "목", "금", "토"][dt.getUTCDay()];
   return `${dt.getUTCMonth() + 1}월 ${dt.getUTCDate()}일 (${yoil})`;
 };
@@ -47,7 +47,7 @@ const formatDate = (dateStr) => {
 const HOUR_HEIGHT = 80;
 const PX_PER_MIN = HOUR_HEIGHT / 60;
 
-/** ===== 이벤트를 날짜별로 분배 ===== */
+/** 이벤트를 날짜별로 분배 (UTC만 사용) */
 function addEventToBuckets(ev, timezone, map) {
   const getDateStringUTC = (d) => {
     const yyyy = d.getUTCFullYear();
@@ -149,6 +149,30 @@ function shallowEqualArray(arr1, arr2) {
   return true;
 }
 
+/** 선택 타임존의 "지금" 시각 (UTC만 사용) */
+const getNowInTimezone = (timezone) => {
+  const nowUTC = new Date(); // 내부적으로 UTC 기반
+  // KST(+9)로 이동
+  const kst = new Date(nowUTC);
+  kst.setUTCHours(kst.getUTCHours() + 9);
+  // 선택 타임존 상대 오프셋 적용 (KST 기준)
+  const display = new Date(kst);
+  display.setUTCHours(display.getUTCHours() + tzOffsets[timezone]);
+
+  // YYYY-MM-DD, HH:mm 계산 (모두 UTC getter)
+  const yyyy = display.getUTCFullYear();
+  const mm = String(display.getUTCMonth() + 1).padStart(2, "0");
+  const dd = String(display.getUTCDate()).padStart(2, "0");
+  const HH = String(display.getUTCSeconds() === 59 ? (display.getUTCHours() + 1) % 24 : display.getUTCHours()).padStart(2, "0");
+  const MM = String(display.getUTCMinutes()).padStart(2, "0");
+
+  return {
+    full: display,
+    dateStr: `${yyyy}-${mm}-${dd}`,
+    hm: `${HH}:${MM}`,
+  };
+};
+
 export default function App() {
   const [timezone, setTimezone] = useState("PST");
   const [page, setPage] = useState(0);
@@ -157,13 +181,15 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [selectedNote, setSelectedNote] = useState(null);
 
+  // 현재 시간(선택 타임존 기준) 상태
+  const [nowInTZ, setNowInTZ] = useState(() => getNowInTimezone(timezone));
+
   /** ===== 데이터 자동 로드 + 변경 감지 ===== */
   useEffect(() => {
     let timer;
     const loadData = async () => {
       try {
         const [newEvents, newHotels] = await Promise.all([fetchItinerary(), fetchHotels()]);
-
         setEvents((prev) => (shallowEqualArray(prev, newEvents) ? prev : newEvents));
         setHotels((prev) => (shallowEqualArray(prev, newHotels) ? prev : newHotels));
         setLoading(false);
@@ -171,17 +197,24 @@ export default function App() {
         console.error("데이터 로드 실패:", err);
       }
     };
-
     loadData();
     timer = setInterval(loadData, 30000);
     return () => clearInterval(timer);
   }, []);
 
+  /** ===== 타임존 변경/주기적 갱신 시 now 업데이트 ===== */
+  useEffect(() => {
+    setNowInTZ(getNowInTimezone(timezone)); // 타임존 바꾸면 즉시 반영
+    const t = setInterval(() => {
+      setNowInTZ(getNowInTimezone(timezone));
+    }, 30000); // 30초마다 갱신
+    return () => clearInterval(t);
+  }, [timezone]);
+
   /** ===== 날짜별 이벤트 버킷 ===== */
   const buckets = useMemo(() => {
     const map = new Map();
     for (const ev of events) addEventToBuckets(ev, timezone, map);
-
     for (const [k, arr] of map) {
       arr.sort((a, b) => toMinutes(a.start) - toMinutes(b.start));
     }
@@ -207,11 +240,10 @@ export default function App() {
   const curPage = Math.min(page, totalPages - 1);
   const days = dates.slice(curPage, curPage + daysPerPage);
 
-  /** ===== 시간 범위 계산 ===== */
+  /** ===== 시간 범위 계산 (현재 페이지에서만) ===== */
   const [dayStartHour, dayEndHour] = useMemo(() => {
     let min = 24 * 60;
     let max = 0;
-
     for (const d of days) {
       const arr = buckets.get(d) || [];
       for (const ev of arr) {
@@ -221,7 +253,6 @@ export default function App() {
         max = Math.max(max, e);
       }
     }
-
     if (min === 24 * 60) min = 8 * 60;
     if (max === 0) max = 20 * 60;
     return [Math.floor(min / 60), Math.ceil(max / 60)];
@@ -250,7 +281,13 @@ export default function App() {
     );
   }
 
-  /** ===== 실제 화면 ===== */
+  /** 현재 시간이 표시 가능한지 계산 (선택 타임존의 오늘이 보이는 날짜들 중 하나인지) */
+  const nowDateStr = nowInTZ.dateStr;
+  const nowHM = nowInTZ.hm;
+  const nowMin = toMinutes(nowHM);
+  const canDrawNowLine = days.includes(nowDateStr) && nowMin >= dayStartHour * 60 && nowMin <= dayEndHour * 60;
+  const nowTop = (nowMin - dayStartHour * 60) * PX_PER_MIN; // px 위치
+
   return (
     <div className="flex flex-col h-screen bg-gradient-to-b from-gray-50 to-white" {...swipe}>
       {/* 상단 헤더 */}
@@ -301,10 +338,12 @@ export default function App() {
         {/* 이벤트 칼럼 */}
         <div
           className="grid flex-1 gap-2 px-3 relative"
-          style={{ gridTemplateColumns: `repeat(${daysPerPage}, 1fr)` }}
+          style={{ gridTemplateColumns: `repeat(${days.length}, 1fr)` }}
         >
           {days.map((date) => {
             const events = buckets.get(date) || [];
+            const isTodayColumn = canDrawNowLine && date === nowDateStr;
+
             return (
               <div
                 key={date}
@@ -314,6 +353,21 @@ export default function App() {
                   gridTemplateRows: `repeat(${(dayEndHour - dayStartHour) * 60}, ${PX_PER_MIN}px)`,
                 }}
               >
+                {/* 현재시간 빨간 가로줄 (오늘 칼럼에만 표시) */}
+                {isTodayColumn && (
+                  <div
+                    className="absolute left-0 right-0"
+                    style={{ top: nowTop, zIndex: 20 }}
+                  >
+                    <div className="h-0.5 bg-red-500 w-full" />
+                    {/* 필요하면 현재 시간 라벨도 표시 가능
+                    <div className="absolute -top-3 left-1 text-[10px] text-red-600 bg-white px-1 rounded">
+                      {nowHM}
+                    </div>
+                    */}
+                  </div>
+                )}
+
                 {events.map((ev, idx) => {
                   const sMin = toMinutes(ev.start) - dayStartHour * 60;
                   const eMin = toMinutes(ev.end) - dayStartHour * 60;
