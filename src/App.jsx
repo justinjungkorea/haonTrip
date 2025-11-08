@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useEffect } from "react";
+import React, { useMemo, useState, useEffect, useRef } from "react";
 import { useSwipeable } from "react-swipeable";
 import { FaPlaneDeparture } from "react-icons/fa";
 
@@ -35,7 +35,7 @@ const convertDateTime = (dateStr, hm, fromTZ, toTZ) => {
   return { date: `${yyyy}-${mm}-${dd}`, time: `${HH}:${MM}`, full: d };
 };
 
-/** 날짜 포맷도 UTC로 */
+/** 날짜 포맷(UTC) */
 const formatDate = (dateStr) => {
   const [y, m, d] = dateStr.split("-").map(Number);
   const dt = new Date(Date.UTC(y, m - 1, d, 12, 0));
@@ -152,18 +152,17 @@ function shallowEqualArray(arr1, arr2) {
 /** 선택 타임존의 "지금" 시각 (UTC만 사용) */
 const getNowInTimezone = (timezone) => {
   const nowUTC = new Date(); // 내부적으로 UTC 기반
-  // KST(+9)로 이동
+  // KST(+9)
   const kst = new Date(nowUTC);
   kst.setUTCHours(kst.getUTCHours() + 9);
-  // 선택 타임존 상대 오프셋 적용 (KST 기준)
+  // 선택 타임존 상대 오프셋 적용
   const display = new Date(kst);
   display.setUTCHours(display.getUTCHours() + tzOffsets[timezone]);
 
-  // YYYY-MM-DD, HH:mm 계산 (모두 UTC getter)
   const yyyy = display.getUTCFullYear();
   const mm = String(display.getUTCMonth() + 1).padStart(2, "0");
   const dd = String(display.getUTCDate()).padStart(2, "0");
-  const HH = String(display.getUTCSeconds() === 59 ? (display.getUTCHours() + 1) % 24 : display.getUTCHours()).padStart(2, "0");
+  const HH = String(display.getUTCHours()).padStart(2, "0");
   const MM = String(display.getUTCMinutes()).padStart(2, "0");
 
   return {
@@ -181,8 +180,11 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [selectedNote, setSelectedNote] = useState(null);
 
-  // 현재 시간(선택 타임존 기준) 상태
+  // 현재 시간(선택 타임존 기준)
   const [nowInTZ, setNowInTZ] = useState(() => getNowInTimezone(timezone));
+
+  // 오늘을 왼쪽에 스냅할지 여부 (스와이프 시 해제)
+  const [snapToToday, setSnapToToday] = useState(true);
 
   /** ===== 데이터 자동 로드 + 변경 감지 ===== */
   useEffect(() => {
@@ -204,10 +206,8 @@ export default function App() {
 
   /** ===== 타임존 변경/주기적 갱신 시 now 업데이트 ===== */
   useEffect(() => {
-    setNowInTZ(getNowInTimezone(timezone)); // 타임존 바꾸면 즉시 반영
-    const t = setInterval(() => {
-      setNowInTZ(getNowInTimezone(timezone));
-    }, 30000); // 30초마다 갱신
+    setNowInTZ(getNowInTimezone(timezone));
+    const t = setInterval(() => setNowInTZ(getNowInTimezone(timezone)), 30000);
     return () => clearInterval(t);
   }, [timezone]);
 
@@ -237,6 +237,17 @@ export default function App() {
     return () => window.removeEventListener("resize", handleResize);
   }, []);
 
+  // 오늘을 왼쪽에 스냅 (여행 중이고 오늘이 일정에 포함될 때)
+  useEffect(() => {
+    if (!snapToToday) return;
+    const todayIdx = dates.indexOf(nowInTZ.dateStr);
+    if (todayIdx === -1) return;
+
+    const maxLeft = Math.max(0, dates.length - daysPerPage);
+    const clamped = Math.max(0, Math.min(todayIdx, maxLeft));
+    setPage(clamped);
+  }, [snapToToday, dates, daysPerPage, nowInTZ.dateStr]);
+
   const curPage = Math.min(page, totalPages - 1);
   const days = dates.slice(curPage, curPage + daysPerPage);
 
@@ -265,8 +276,14 @@ export default function App() {
   }, [dayStartHour, dayEndHour]);
 
   const swipe = useSwipeable({
-    onSwipedLeft: () => setPage((p) => Math.min(p + 1, totalPages - 1)),
-    onSwipedRight: () => setPage((p) => Math.max(p - 1, 0)),
+    onSwipedLeft: () => {
+      setPage((p) => Math.min(p + 1, totalPages - 1));
+      setSnapToToday(false); // 사용자가 넘기면 스냅 해제
+    },
+    onSwipedRight: () => {
+      setPage((p) => Math.max(p - 1, 0));
+      setSnapToToday(false); // 사용자가 넘기면 스냅 해제
+    },
     trackMouse: true,
   });
 
@@ -281,12 +298,12 @@ export default function App() {
     );
   }
 
-  /** 현재 시간이 표시 가능한지 계산 (선택 타임존의 오늘이 보이는 날짜들 중 하나인지) */
+  /** 현재시간 라인 (선택 타임존의 오늘이 보이는 경우만) */
   const nowDateStr = nowInTZ.dateStr;
   const nowHM = nowInTZ.hm;
   const nowMin = toMinutes(nowHM);
   const canDrawNowLine = days.includes(nowDateStr) && nowMin >= dayStartHour * 60 && nowMin <= dayEndHour * 60;
-  const nowTop = (nowMin - dayStartHour * 60) * PX_PER_MIN; // px 위치
+  const nowTop = (nowMin - dayStartHour * 60) * PX_PER_MIN;
 
   return (
     <div className="flex flex-col h-screen bg-gradient-to-b from-gray-50 to-white" {...swipe}>
@@ -298,7 +315,10 @@ export default function App() {
         </div>
         <button
           className="px-4 py-1 rounded-full bg-blue-500 text-white text-sm shadow hover:bg-blue-600 transition"
-          onClick={() => setTimezone((t) => (t === "KST" ? "PST" : "KST"))}
+          onClick={() => {
+            setTimezone((t) => (t === "KST" ? "PST" : "KST"));
+            setSnapToToday(true); // 타임존 바꾸면 다시 오늘로 스냅
+          }}
         >
           {timezone === "KST" ? "현지시간" : "한국시간"}
         </button>
@@ -353,18 +373,10 @@ export default function App() {
                   gridTemplateRows: `repeat(${(dayEndHour - dayStartHour) * 60}, ${PX_PER_MIN}px)`,
                 }}
               >
-                {/* 현재시간 빨간 가로줄 (오늘 칼럼에만 표시) */}
+                {/* 현재시간 빨간 가로줄 */}
                 {isTodayColumn && (
-                  <div
-                    className="absolute left-0 right-0"
-                    style={{ top: nowTop, zIndex: 20 }}
-                  >
+                  <div className="absolute left-0 right-0" style={{ top: nowTop, zIndex: 20 }}>
                     <div className="h-0.5 bg-red-500 w-full" />
-                    {/* 필요하면 현재 시간 라벨도 표시 가능
-                    <div className="absolute -top-3 left-1 text-[10px] text-red-600 bg-white px-1 rounded">
-                      {nowHM}
-                    </div>
-                    */}
                   </div>
                 )}
 
