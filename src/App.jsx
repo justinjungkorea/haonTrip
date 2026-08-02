@@ -1,9 +1,22 @@
 import React, { useMemo, useState, useEffect, useRef } from "react";
 import { useSwipeable } from "react-swipeable";
 import { FaPlaneDeparture } from "react-icons/fa";
+import dayjs from "dayjs";
+import utc from "dayjs/plugin/utc";
+import timezone from "dayjs/plugin/timezone";
+
+dayjs.extend(utc);
+dayjs.extend(timezone);
 
 /** ===== Time / TZ helpers ===== */
-const tzOffsets = { KST: 0, PST: -17 }; // KST 기준 상대 오프셋
+const TZ_MAP = {
+  KST: "Asia/Seoul",
+  PST: "America/Los_Angeles",
+  EST: "America/New_York",
+  CST: "America/Chicago",
+  MST: "America/Denver",
+  HST: "Pacific/Honolulu"
+};
 
 const toMinutes = (hm) => {
   let [h, m] = hm.split(":").map(Number);
@@ -14,88 +27,56 @@ const toMinutes = (hm) => {
   return h * 60 + m;
 };
 
-/** UTC 기준으로 Date 생성 */
-const parseDateTimeUTC = (dateStr, hm) => {
-  const [y, m, d] = dateStr.split("-").map(Number);
-  const [H, M] = hm.split(":").map(Number);
-  return new Date(Date.UTC(y, m - 1, d, H, M, 0, 0));
-};
-
-/** UTC에서만 가감 + UTC로 문자열 생성 */
-const convertDateTime = (dateStr, hm, fromTZ, toTZ) => {
-  const d = parseDateTimeUTC(dateStr, hm);
-  d.setUTCHours(d.getUTCHours() + (tzOffsets[toTZ] - tzOffsets[fromTZ]));
-
-  const yyyy = d.getUTCFullYear();
-  const mm = String(d.getUTCMonth() + 1).padStart(2, "0");
-  const dd = String(d.getUTCDate()).padStart(2, "0");
-  const HH = String(d.getUTCHours()).padStart(2, "0");
-  const MM = String(d.getUTCMinutes()).padStart(2, "0");
-
-  return { date: `${yyyy}-${mm}-${dd}`, time: `${HH}:${MM}`, full: d };
-};
-
-/** 날짜 포맷(UTC) */
 const formatDate = (dateStr) => {
-  const [y, m, d] = dateStr.split("-").map(Number);
-  const dt = new Date(Date.UTC(y, m - 1, d, 12, 0));
-  const yoil = ["일", "월", "화", "수", "목", "금", "토"][dt.getUTCDay()];
-  return `${dt.getUTCMonth() + 1}월 ${dt.getUTCDate()}일 (${yoil})`;
+  const dt = dayjs(dateStr);
+  const yoil = ["일", "월", "화", "수", "목", "금", "토"][dt.day()];
+  return `${dt.month() + 1}월 ${dt.date()}일 (${yoil})`;
 };
 
-/** ===== Layout config ===== */
 const HOUR_HEIGHT = 80;
 const PX_PER_MIN = HOUR_HEIGHT / 60;
 
-/** 이벤트를 날짜별로 분배 (UTC만 사용) */
-function addEventToBuckets(ev, timezone, map) {
-  const getDateStringUTC = (d) => {
-    const yyyy = d.getUTCFullYear();
-    const mm = String(d.getUTCMonth() + 1).padStart(2, "0");
-    const dd = String(d.getUTCDate()).padStart(2, "0");
-    return `${yyyy}-${mm}-${dd}`;
-  };
-
-  const s = convertDateTime(ev.startDate, ev.startTime, ev.tz, timezone);
-  const e = convertDateTime(ev.endDate, ev.endTime, ev.tz, timezone);
-
-  let cur = new Date(s.full);
-  cur.setUTCHours(0, 0, 0, 0);
-
-  const last = new Date(e.full);
-  last.setUTCHours(0, 0, 0, 0);
-
-  while (cur.getTime() <= last.getTime()) {
-    const curDate = getDateStringUTC(cur);
+function addEventToBuckets(ev, displayTimezone, map) {
+  const tzIana = TZ_MAP[displayTimezone] || "UTC";
+  
+  const start = dayjs(ev.startUtc).tz(tzIana);
+  const end = dayjs(ev.endUtc).tz(tzIana);
+  
+  let curDay = start.startOf('day');
+  const lastDay = end.startOf('day');
+  
+  while (curDay.isBefore(lastDay) || curDay.isSame(lastDay)) {
+    const dateStr = curDay.format("YYYY-MM-DD");
     let startHM, endHM;
-
-    if (curDate === s.date && curDate === e.date) {
-      startHM = s.time;
-      endHM = e.time;
-    } else if (curDate === s.date) {
-      startHM = s.time;
+    
+    if (curDay.isSame(start.startOf('day')) && curDay.isSame(lastDay)) {
+      startHM = start.format("HH:mm");
+      endHM = end.format("HH:mm");
+    } else if (curDay.isSame(start.startOf('day'))) {
+      startHM = start.format("HH:mm");
       endHM = "23:59";
-    } else if (curDate === e.date) {
+    } else if (curDay.isSame(lastDay)) {
       startHM = "00:00";
-      endHM = e.time;
+      endHM = end.format("HH:mm");
     } else {
-      cur.setUTCDate(cur.getUTCDate() + 1);
-      continue;
+      startHM = "00:00";
+      endHM = "23:59";
     }
-
-    if (!map.has(curDate)) map.set(curDate, []);
-    map.get(curDate).push({
-      title: ev.title,
-      start: startHM,
-      end: endHM,
-      note: ev.note,
-    });
-
-    cur.setUTCDate(cur.getUTCDate() + 1);
+    
+    if (startHM !== endHM) {
+      if (!map.has(dateStr)) map.set(dateStr, []);
+      map.get(dateStr).push({
+        title: ev.title,
+        start: startHM,
+        end: endHM,
+        note: ev.note,
+      });
+    }
+    
+    curDay = curDay.add(1, 'day');
   }
 }
 
-/** ===== 구글 시트 fetch ===== */
 function normalizeTime(t) {
   if (!t) return "00:00";
   const [h, m] = t.split(":").map(Number);
@@ -106,29 +87,45 @@ async function fetchItinerary() {
   const res = await fetch(import.meta.env.VITE_SHEET_URL);
   const text = await res.text();
   const rows = text.trim().split("\n");
-  const header = rows[0].split(",").map((h) => h.trim());
+  
+  const header = rows[0].split(",").map((h) => h.trim().replace(/^\uFEFF/, ""));
+  
+  // 정규식을 사용해 숨겨진 따옴표나 특수문자를 제거하고 순수 알파벳만 추출
+  const rawTz = header[7] || "PST";
+  const sheetDefaultTz = rawTz.replace(/[^a-zA-Z]/g, "").toUpperCase();
 
-  return rows.slice(1).map((line) => {
+  const data = rows.slice(1).map((line) => {
     const cols = line.split(",").map((s) => s.trim());
     const obj = {};
     header.forEach((h, i) => (obj[h] = cols[i] || ""));
+
+    const sDate = obj["시작일"];
+    const sTime = normalizeTime(obj["시작시간"]);
+    const eDate = obj["종료일"];
+    const eTime = normalizeTime(obj["종료시간"]);
+    const tz = obj["타임존"] || "KST";
+
+    const iana = TZ_MAP[tz] || "UTC";
+    const startUtc = dayjs.tz(`${sDate} ${sTime}`, iana).valueOf();
+    const endUtc = dayjs.tz(`${eDate} ${eTime}`, iana).valueOf();
+
     return {
-      startDate: obj["시작일"],
-      startTime: normalizeTime(obj["시작시간"]),
-      endDate: obj["종료일"],
-      endTime: normalizeTime(obj["종료시간"]),
       title: obj["제목"],
-      tz: obj["타임존"],
+      startUtc,
+      endUtc,
+      originalTz: tz,
       note: obj["노트"],
     };
   });
+
+  return { data, sheetDefaultTz };
 }
 
 async function fetchHotels() {
   const res = await fetch(import.meta.env.VITE_HOTEL_URL);
   const text = await res.text();
   const rows = text.trim().split("\n");
-  const header = rows[0].split(",").map((h) => h.trim());
+  const header = rows[0].split(",").map((h) => h.trim().replace(/^\uFEFF/, ""));
 
   return rows.slice(1).map((line) => {
     const cols = line.split(",").map((s) => s.trim());
@@ -149,30 +146,19 @@ function shallowEqualArray(arr1, arr2) {
   return true;
 }
 
-/** 선택 타임존의 "지금" 시각 (UTC만 사용) */
 const getNowInTimezone = (timezone) => {
-  const nowUTC = new Date(); // 내부적으로 UTC 기반
-  // KST(+9)
-  const kst = new Date(nowUTC);
-  kst.setUTCHours(kst.getUTCHours() + 9);
-  // 선택 타임존 상대 오프셋 적용
-  const display = new Date(kst);
-  display.setUTCHours(display.getUTCHours() + tzOffsets[timezone]);
-
-  const yyyy = display.getUTCFullYear();
-  const mm = String(display.getUTCMonth() + 1).padStart(2, "0");
-  const dd = String(display.getUTCDate()).padStart(2, "0");
-  const HH = String(display.getUTCHours()).padStart(2, "0");
-  const MM = String(display.getUTCMinutes()).padStart(2, "0");
+  const iana = TZ_MAP[timezone] || "UTC";
+  const now = dayjs().tz(iana);
 
   return {
-    full: display,
-    dateStr: `${yyyy}-${mm}-${dd}`,
-    hm: `${HH}:${MM}`,
+    full: now.toDate(),
+    dateStr: now.format("YYYY-MM-DD"),
+    hm: now.format("HH:mm"),
   };
 };
 
 export default function App() {
+  const [defaultTz, setDefaultTz] = useState("PST");
   const [timezone, setTimezone] = useState("PST");
   const [page, setPage] = useState(0);
   const [events, setEvents] = useState([]);
@@ -180,18 +166,25 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [selectedNote, setSelectedNote] = useState(null);
 
-  // 현재 시간(선택 타임존 기준)
   const [nowInTZ, setNowInTZ] = useState(() => getNowInTimezone(timezone));
-
-  // 오늘을 왼쪽에 스냅할지 여부 (스와이프 시 해제)
   const [snapToToday, setSnapToToday] = useState(true);
 
-  /** ===== 데이터 자동 로드 + 변경 감지 ===== */
   useEffect(() => {
     let timer;
+    let isInitialLoad = true;
+
     const loadData = async () => {
       try {
-        const [newEvents, newHotels] = await Promise.all([fetchItinerary(), fetchHotels()]);
+        const [itineraryRes, newHotels] = await Promise.all([fetchItinerary(), fetchHotels()]);
+        const { data: newEvents, sheetDefaultTz } = itineraryRes;
+
+        // 상태 업데이트 분리: 데이터 로드 시 defaultTz를 독립적으로 갱신
+        setDefaultTz(sheetDefaultTz);
+        if (isInitialLoad) {
+          setTimezone(sheetDefaultTz);
+          isInitialLoad = false;
+        }
+
         setEvents((prev) => (shallowEqualArray(prev, newEvents) ? prev : newEvents));
         setHotels((prev) => (shallowEqualArray(prev, newHotels) ? prev : newHotels));
         setLoading(false);
@@ -204,14 +197,12 @@ export default function App() {
     return () => clearInterval(timer);
   }, []);
 
-  /** ===== 타임존 변경/주기적 갱신 시 now 업데이트 ===== */
   useEffect(() => {
     setNowInTZ(getNowInTimezone(timezone));
     const t = setInterval(() => setNowInTZ(getNowInTimezone(timezone)), 30000);
     return () => clearInterval(t);
   }, [timezone]);
 
-  /** ===== 날짜별 이벤트 버킷 ===== */
   const buckets = useMemo(() => {
     const map = new Map();
     for (const ev of events) addEventToBuckets(ev, timezone, map);
@@ -224,7 +215,6 @@ export default function App() {
   const dates = [...buckets.keys()];
   const totalPages = Math.max(1, dates.length - 1);
 
-  /** ===== 화면 크기에 따라 보여줄 일수 ===== */
   const [daysPerPage, setDaysPerPage] = useState(2);
   useEffect(() => {
     const handleResize = () => {
@@ -237,7 +227,6 @@ export default function App() {
     return () => window.removeEventListener("resize", handleResize);
   }, []);
 
-  // 오늘을 왼쪽에 스냅 (여행 중이고 오늘이 일정에 포함될 때)
   useEffect(() => {
     if (!snapToToday) return;
     const todayIdx = dates.indexOf(nowInTZ.dateStr);
@@ -251,7 +240,6 @@ export default function App() {
   const curPage = Math.min(page, totalPages - 1);
   const days = dates.slice(curPage, curPage + daysPerPage);
 
-  /** ===== 시간 범위 계산 (현재 페이지에서만) ===== */
   const [dayStartHour, dayEndHour] = useMemo(() => {
     let min = 24 * 60;
     let max = 0;
@@ -278,18 +266,17 @@ export default function App() {
   const swipe = useSwipeable({
     onSwipedLeft: () => {
       setPage((p) => Math.min(p + 1, totalPages - 1));
-      setSnapToToday(false); // 사용자가 넘기면 스냅 해제
+      setSnapToToday(false);
     },
     onSwipedRight: () => {
       setPage((p) => Math.max(p - 1, 0));
-      setSnapToToday(false); // 사용자가 넘기면 스냅 해제
+      setSnapToToday(false);
     },
     trackMouse: true,
   });
 
   const colors = ["bg-blue-200", "bg-green-200", "bg-yellow-200", "bg-purple-200", "bg-pink-200"];
 
-  /** ===== 로딩 화면 ===== */
   if (loading) {
     return (
       <div className="flex items-center justify-center h-screen bg-gray-50">
@@ -298,7 +285,6 @@ export default function App() {
     );
   }
 
-  /** 현재시간 라인 (선택 타임존의 오늘이 보이는 경우만) */
   const nowDateStr = nowInTZ.dateStr;
   const nowHM = nowInTZ.hm;
   const nowMin = toMinutes(nowHM);
@@ -307,24 +293,24 @@ export default function App() {
 
   return (
     <div className="flex flex-col h-screen bg-gradient-to-b from-gray-50 to-white" {...swipe}>
-      {/* 상단 헤더 */}
       <header className="flex justify-between items-center p-4 bg-white shadow-md">
         <div className="flex items-center space-x-2 font-bold text-lg text-gray-700">
           <FaPlaneDeparture className="text-blue-500" />
           <span>여행 일정</span>
         </div>
-        <button
-          className="px-4 py-1 rounded-full bg-blue-500 text-white text-sm shadow hover:bg-blue-600 transition"
-          onClick={() => {
-            setTimezone((t) => (t === "KST" ? "PST" : "KST"));
-            setSnapToToday(true); // 타임존 바꾸면 다시 오늘로 스냅
-          }}
-        >
-          {timezone === "KST" ? "현지시간" : "한국시간"}
-        </button>
+        {defaultTz !== "KST" && (
+          <button
+            className="px-4 py-1 rounded-full bg-blue-500 text-white text-sm shadow hover:bg-blue-600 transition"
+            onClick={() => {
+              setTimezone((t) => (t === "KST" ? defaultTz : "KST"));
+              setSnapToToday(true);
+            }}
+          >
+            {timezone === "KST" ? "현지시간" : "한국시간"}
+          </button>
+        )}
       </header>
 
-      {/* 날짜 헤더 */}
       <div className="flex border-b border-gray-200 bg-white shadow-sm">
         <div className="w-12" />
         {days.map((d) => (
@@ -344,9 +330,7 @@ export default function App() {
         ))}
       </div>
 
-      {/* 본문 */}
       <div className="flex flex-1 overflow-y-auto">
-        {/* 시간축 */}
         <div className="w-12 border-r border-gray-200 bg-gray-50 sticky left-0 z-10">
           {hours.map((h) => (
             <div key={h} className="relative" style={{ height: HOUR_HEIGHT }}>
@@ -355,7 +339,6 @@ export default function App() {
           ))}
         </div>
 
-        {/* 이벤트 칼럼 */}
         <div
           className="grid flex-1 gap-2 px-3 relative"
           style={{ gridTemplateColumns: `repeat(${days.length}, 1fr)` }}
@@ -373,7 +356,6 @@ export default function App() {
                   gridTemplateRows: `repeat(${(dayEndHour - dayStartHour) * 60}, ${PX_PER_MIN}px)`,
                 }}
               >
-                {/* 현재시간 빨간 가로줄 */}
                 {isTodayColumn && (
                   <div className="absolute left-0 right-0" style={{ top: nowTop, zIndex: 20 }}>
                     <div className="h-0.5 bg-red-500 w-full" />
@@ -408,7 +390,6 @@ export default function App() {
         </div>
       </div>
 
-      {/* 노트 모달 */}
       {selectedNote && (
         <div
           className="fixed inset-0 flex items-center justify-center bg-black bg-opacity-40 z-50"

@@ -11,7 +11,7 @@
     "deploy": "npm run build && echo 'trip.justinjung.kr' > dist/CNAME && gh-pages -d dist"
   },
   "dependencies": {
-    "dayjs": "^1.11.18",
+    "dayjs": "^1.11.21",
     "framer-motion": "^12.23.22",
     "lucide-react": "^0.544.0",
     "react": "^19.1.1",
